@@ -1,16 +1,16 @@
 name: CI
 
 on:
-  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
+      - trigger-ci-workflow
     paths:
       - "Cargo.lock"
       - "Cargo.toml"
-      - "scuttlebutt/**"
-      - "scuttlebutt-*/**"
+      - "chitchat/**"
+      - "chitchat-*/**"
 
 
 env:
@@ -21,23 +21,31 @@ jobs:
   check:
     name: Check (fmt, dependency check, clippy, test)
     runs-on: ubuntu-latest
-    container: public.ecr.aws/l6o9a3f9/quickwit-builder:latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - uses: actions/checkout@v4
+      - name: Install Ubuntu packages
+        if: always() && steps.modified.outputs.rust_src == 'true'
+        run: sudo apt-get -y install protobuf-compiler python3 python3-pip
+      - name: Install rustup
+        if: steps.modified.outputs.rust_src == 'true'
+        run: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain none -y
+      - name: Setup stable Rust Toolchain
+        if: steps.modified.outputs.rust_src == 'true'
+        run: rustup show
+        working-directory: ./chitchat
+      - name: Setup nightly Rust Toolchain (for rustfmt)
+        if: steps.modified.outputs.rust_src == 'true'
+        run: rustup toolchain install nightly
+      - name: Setup cache
+        if: steps.modified.outputs.rust_src == 'true'
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo
-            target/
-          key: ${{ runner.os }}-cargolint-${{ hashFiles('Cargo.lock') }}
+          workspaces: "./chitchat -> target"
+      - name: cargo clippy
+        if: always() && steps.modified.outputs.rust_src == 'true'
+        run: cargo clippy --workspace --tests --all-features
+        working-directory: ./chitchat
       - name: rustfmt
+        if: always() && steps.modified.outputs.rust_src == 'true'
         run: cargo +nightly fmt --all -- --check
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --workspace --tests
-      - uses: actions-rs/cargo@v1
-        name: cargo test
-        with:
-          command: test
-          args: --release -- --test-threads 1
+        working-directory: ./chitchat
